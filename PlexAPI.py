@@ -69,7 +69,7 @@ def declarePMS(ATV_udid, uuid, name, scheme, ip, port):
     global g_PMS
     if not ATV_udid in g_PMS:
         g_PMS[ATV_udid] = {}
-    
+
     address = ip + ':' + port
     baseURL = scheme+'://'+ip+':'+port
     g_PMS[ATV_udid][uuid] = { 'name': name,
@@ -87,7 +87,7 @@ def updatePMSProperty(ATV_udid, uuid, tag, value):
         return ''  # no server known for this aTV
     if not uuid in g_PMS[ATV_udid]:
         return ''  # requested PMS not available
-    
+
     g_PMS[ATV_udid][uuid][tag] = value
 
 def getPMSProperty(ATV_udid, uuid, tag):
@@ -96,14 +96,14 @@ def getPMSProperty(ATV_udid, uuid, tag):
         return ''  # no server known for this aTV
     if not uuid in g_PMS[ATV_udid]:
         return ''  # requested PMS not available
-    
+
     return g_PMS[ATV_udid][uuid].get(tag, '')
 
 def getPMSFromAddress(ATV_udid, address):
     # find PMS by IP, return UUID
     if not ATV_udid in g_PMS:
         return ''  # no server known for this aTV
-    
+
     for uuid in g_PMS[ATV_udid]:
         if address==g_PMS[ATV_udid][uuid].get('ip', None):
             return uuid
@@ -115,14 +115,14 @@ def getPMSAddress(ATV_udid, uuid):
         return ''  # no server known for this aTV
     if not uuid in g_PMS[ATV_udid]:
         return ''  # requested PMS not available
-    
+
     return g_PMS[ATV_udid][uuid]['ip'] + ':' + g_PMS[ATV_udid][uuid]['port']
 
 def getPMSCount(ATV_udid):
     # get count of discovered PMS by UUID
     if not ATV_udid in g_PMS:
         return 0  # no server known for this aTV
-    
+
     return len(g_PMS[ATV_udid])
 
 
@@ -143,14 +143,14 @@ def PlexGDM():
     dprint(__name__, 0, "***")
     dprint(__name__, 0, "looking up Plex Media Server")
     dprint(__name__, 0, "***")
-    
+
     # setup socket for discovery -> multicast message
     GDM = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     GDM.settimeout(1.0)
-    
+
     # Set the time-to-live for messages to 1 for local network
     GDM.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    
+
     returnData = []
     try:
         # Send data to the multicast group
@@ -176,16 +176,16 @@ def PlexGDM():
     if returnData:
         for response in returnData:
             update = { 'ip' : response.get('from')[0] }
-            
-            # Check if we had a positive HTTP response                        
+
+            # Check if we had a positive HTTP response
             if "200 OK" in response.get('data'):
-                for each in response.get('data').split('\n'): 
+                for each in response.get('data').split('\n'):
                     # decode response data
                     update['discovery'] = "auto"
                     #update['owned']='1'
                     #update['master']= 1
                     #update['role']='master'
-                    
+
                     if "Content-Type:" in each:
                         update['content-type'] = each.split(':')[1].strip()
                     elif "Resource-Identifier:" in each:
@@ -198,16 +198,16 @@ def PlexGDM():
                         update['updated'] = each.split(':')[1].strip()
                     elif "Version:" in each:
                         update['version'] = each.split(':')[1].strip()
-            
+
             PMS_list[update['uuid']] = update
-    
+
     if PMS_list=={}:
         dprint(__name__, 0, "GDM: No servers discovered")
     else:
         dprint(__name__, 0, "GDM: Servers discovered: {0}", len(PMS_list))
         for uuid in PMS_list:
             dprint(__name__, 1, "{0} {1}:{2}", PMS_list[uuid]['serverName'], PMS_list[uuid]['ip'], PMS_list[uuid]['port'])
-    
+
     return PMS_list
 
 
@@ -225,54 +225,56 @@ result:
 def discoverPMS(ATV_udid, CSettings, MyPlexToken=''):
     global g_PMS
     g_PMS[ATV_udid] = {}
-    
+
     #debug
     #declarePMS(ATV_udid, '2ndServer', '2ndServer', 'http', '192.168.178.22', '32400', 'local', '1', 'token')
     #declarePMS(ATV_udid, 'remoteServer', 'remoteServer', 'http', '127.0.0.1', '1234', 'myplex', '1', 'token')
     #debug
-    
+
     # local PMS
     if CSettings.getSetting('enable_plexgdm')=='False':
         # defined in setting.cfg
         ip = CSettings.getSetting('ip_pms')
         port = CSettings.getSetting('port_pms')
         XML = getXMLFromPMS('http://'+ip+':'+port, '/servers', None, '')
-        
+
         if XML==False:
             pass  # no response from manual defined server (Settings.cfg)
         else:
             Server = XML.find('Server')
             uuid = Server.get('machineIdentifier')
             name = Server.get('name')
-            
+
             declarePMS(ATV_udid, uuid, name, 'http', ip, port)  # dflt: token='', local, owned
-    
+
     else:
         # PlexGDM
         PMS_list = PlexGDM()
         for uuid in PMS_list:
             PMS = PMS_list[uuid]
             declarePMS(ATV_udid, PMS['uuid'], PMS['serverName'], 'http', PMS['ip'], PMS['port'])  # dflt: token='', local, owned
-    
+
     # MyPlex servers
     if not MyPlexToken=='':
         XML = getXMLFromPMS('https://plex.tv', '/pms/servers', None, MyPlexToken)
-        
+
         if XML==False:
             pass  # no data from MyPlex
         else:
             queue = Queue.Queue()
             threads = []
-            
+
             for Dir in XML.getiterator('Server'):
                 uuid = Dir.get('machineIdentifier')
                 name = Dir.get('name')
                 scheme = Dir.get('scheme')
-                ip = Dir.get('address')
+                # JRH CHANGE
+                # ip = Dir.get('address')
+                ip = Dir.get('localAddresses')
                 port = Dir.get('port')
                 token = Dir.get('accessToken', '')
                 owned = Dir.get('owned', '0')
-                
+
                 if uuid in g_PMS.get(ATV_udid, {}):
                     # server known: local, manually defined or PlexGDM
                     updatePMSProperty(ATV_udid, uuid, 'accesstoken', token)
@@ -285,38 +287,44 @@ def discoverPMS(ATV_udid, CSettings, MyPlexToken=''):
                     if infoAge > 2*oneDayInSec:  # two days in seconds -> expiration in setting?
                         dprint(__name__, 1, "Server {0} not updated for {1} days - skipping.", name, infoAge/oneDayInSec)
                         continue
-                    
+
                     # poke PMS, own thread for each poke
                     PMS = { 'baseURL': scheme+'://'+ip+':'+port, 'path': '/', 'options': None, 'token': token, \
                             'data': Dir }
                     t = Thread(target=getXMLFromPMSToQueue, args=(PMS, queue))
                     t.start()
                     threads.append(t)
-            
+
             # wait for requests being answered
             for t in threads:
                 t.join()
-            
+
             # declare new PMSs
             while not queue.empty():
                     (Dir, PMS) = queue.get()
-                    
+
                     if PMS==False:
                         continue
-                    
+
                     uuid = Dir.get('machineIdentifier')
                     name = Dir.get('name')
                     scheme = Dir.get('scheme')
-                    ip = Dir.get('address')
+                    # JRH CHANGE
+                    # ip = Dir.get('address')
+                    ip = Dir.get('localAddresses')
                     port = Dir.get('port')
                     token = Dir.get('accessToken', '')
                     owned = Dir.get('owned', '0')
-                    
+
                     declarePMS(ATV_udid, uuid, name, scheme, ip, port)  # dflt: token='', local, owned - updated later
-                    updatePMSProperty(ATV_udid, uuid, 'local', '0')  # todo - check IP?
+                    # JRH CHANGE
+                    # updatePMSProperty(ATV_udid, uuid, 'local', '0')  # todo - check IP?
+                    updatePMSProperty(ATV_udid, uuid, 'local', '1')
                     updatePMSProperty(ATV_udid, uuid, 'accesstoken', token)
-                    updatePMSProperty(ATV_udid, uuid, 'owned', owned)
-    
+                    # updatePMSProperty(ATV_udid, uuid, 'owned', owned)
+                    # JRH CHANGE
+                    updatePMSProperty(ATV_udid, uuid, 'owned', '1')
+
     # debug print all servers
     dprint(__name__, 0, "Servers (local+MyPlex): {0}", len(g_PMS[ATV_udid]))
     for uuid in g_PMS[ATV_udid]:
@@ -341,10 +349,10 @@ def getXMLFromPMS(baseURL, path, options={}, authtoken=''):
         xargs = getXArgsDeviceInfo(options)
     if not authtoken=='':
         xargs['X-Plex-Token'] = authtoken
-    
+
     dprint(__name__, 1, "URL: {0}{1}", baseURL, path)
     dprint(__name__, 1, "xargs: {0}", xargs)
-    
+
     request = urllib2.Request(baseURL+path , None, xargs)
     try:
         response = urllib2.urlopen(request, timeout=20)
@@ -358,16 +366,16 @@ def getXMLFromPMS(baseURL, path, options={}, authtoken=''):
     except IOError:
         dprint(__name__, 0, 'Error loading response XML from Plex Media Server')
         return False
-    
+
     # parse into etree
     XML = etree.parse(response)
-    
+
     dprint(__name__, 1, "====== received PMS-XML ======")
     dprint(__name__, 1, XML.getroot())
     dprint(__name__, 1, "====== PMS-XML finished ======")
-    
+
     #XMLTree = etree.ElementTree(etree.fromstring(response))
-    
+
     return XML
 
 
@@ -393,7 +401,7 @@ def getXArgsDeviceInfo(options={}):
         xargs['X-Plex-Platform-Version'] = options['aTVFirmwareVersion']
     xargs['X-Plex-Product'] = 'PlexConnect'
     xargs['X-Plex-Version'] = __VERSION__
-    
+
     return xargs
 
 
@@ -412,10 +420,10 @@ result:
 def getXMLFromMultiplePMS(ATV_udid, path, type, options={}):
     queue = Queue.Queue()
     threads = []
-    
+
     root = etree.Element("MediaConverter")
     root.set('friendlyName', type+' Servers')
-    
+
     for uuid in g_PMS.get(ATV_udid, {}):
         if (type=='all') or \
            (type=='owned' and getPMSProperty(ATV_udid, uuid, 'owned')=='1') or \
@@ -424,44 +432,46 @@ def getXMLFromMultiplePMS(ATV_udid, path, type, options={}):
            (type=='remote' and getPMSProperty(ATV_udid, uuid, 'local')=='0'):
             Server = etree.SubElement(root, 'Server')  # create "Server" node
             Server.set('name',    getPMSProperty(ATV_udid, uuid, 'name'))
-            Server.set('address', getPMSProperty(ATV_udid, uuid, 'ip'))
+            # Server.set('address', getPMSProperty(ATV_udid, uuid, 'ip'))
+            # JRH Change
+            Server.set('address', getPMSProperty(ATV_udid, uuid, 'localAddresses'))
             Server.set('port',    getPMSProperty(ATV_udid, uuid, 'port'))
             Server.set('baseURL', getPMSProperty(ATV_udid, uuid, 'baseURL'))
             Server.set('local',   getPMSProperty(ATV_udid, uuid, 'local'))
             Server.set('owned',   getPMSProperty(ATV_udid, uuid, 'owned'))
-            
+
             baseURL = getPMSProperty(ATV_udid, uuid, 'baseURL')
             token = getPMSProperty(ATV_udid, uuid, 'accesstoken')
             PMS_mark = 'PMS(' + getPMSProperty(ATV_udid, uuid, 'ip') + ')'
-            
+
             Server.set('searchKey', PMS_mark + getURL('', '', '/SearchForm.xml'))
-            
+
             # request XMLs, one thread for each
             PMS = { 'baseURL':baseURL, 'path':path, 'options':options, 'token':token, \
                     'data': {'uuid': uuid, 'Server': Server} }
             t = Thread(target=getXMLFromPMSToQueue, args=(PMS, queue))
             t.start()
             threads.append(t)
-    
+
     # wait for requests being answered
     for t in threads:
         t.join()
-    
+
     # add new data to root XML, individual Server
     while not queue.empty():
             (data, XML) = queue.get()
             uuid = data['uuid']
             Server = data['Server']
-            
+
             baseURL = getPMSProperty(ATV_udid, uuid, 'baseURL')
             token = getPMSProperty(ATV_udid, uuid, 'accesstoken')
             PMS_mark = 'PMS(' + getPMSProperty(ATV_udid, uuid, 'ip') + ')'
-            
+
             if XML==False:
                 Server.set('size',    '0')
             else:
                 Server.set('size',    XML.getroot().get('size', '0'))
-                
+
                 for Dir in XML.getiterator('Directory'):  # copy "Directory" content, add PMS to links
                     key = Dir.get('key')  # absolute path
                     Dir.set('key',    PMS_mark + getURL('', path, key))
@@ -471,22 +481,22 @@ def getXMLFromMultiplePMS(ATV_udid, path, type, options={}):
                     if 'art' in Dir.attrib:
                         Dir.set('art',    PMS_mark + getURL('', path, Dir.get('art')))
                     Server.append(Dir)
-                
+
                 for Playlist in XML.getiterator('Playlist'):  # copy "Playlist" content, add PMS to links
                     key = Playlist.get('key')  # absolute path
                     Playlist.set('key',    PMS_mark + getURL('', path, key))
                     if 'composite' in Playlist.attrib:
                         Playlist.set('composite', PMS_mark + getURL('', path, Playlist.get('composite')))
                     Server.append(Playlist)
-    
+
     root.set('size', str(len(root.findall('Server'))))
-    
+
     XML = etree.ElementTree(root)
-    
+
     dprint(__name__, 1, "====== Local Server/Sections XML ======")
     dprint(__name__, 1, XML.getroot())
     dprint(__name__, 1, "====== Local Server/Sections XML finished ======")
-    
+
     return XML  # XML representation - created "just in time". Do we need to cache it?
 
 
@@ -500,7 +510,7 @@ def getURL(baseURL, path, key):
         URL = baseURL + path
     else:  # internal path, add-on
         URL = baseURL + path + '/' + key
-    
+
     return URL
 
 
@@ -521,12 +531,12 @@ def MyPlexSignIn(username, password, options):
     MyPlexHost = 'plex.tv'
     MyPlexSignInPath = '/users/sign_in.xml'
     MyPlexURL = 'https://' + MyPlexHost + MyPlexSignInPath
-    
+
     # create POST request
     xargs = getXArgsDeviceInfo(options)
     request = urllib2.Request(MyPlexURL, None, xargs)
     request.get_method = lambda: 'POST'  # turn into 'POST' - done automatically with data!=None. But we don't have data.
-    
+
     # no certificate, will fail with "401 - Authentification required"
     """
     try:
@@ -536,7 +546,7 @@ def MyPlexSignIn(username, password, options):
         print "has WWW_Authenticate:", e.headers.has_key('WWW-Authenticate')
         print
     """
-    
+
     # provide credentials
     ### optional... when 'realm' is unknown
     ##passmanager = urllib2.HTTPPasswordMgrWithDefaultRealm()
@@ -545,7 +555,7 @@ def MyPlexSignIn(username, password, options):
     passmanager.add_password(MyPlexHost, MyPlexURL, username, password)  # realm = 'plex.tv'
     authhandler = urllib2.HTTPBasicAuthHandler(passmanager)
     urlopener = urllib2.build_opener(authhandler)
-    
+
     # sign in, get MyPlex response
     try:
         response = urlopener.open(request).read()
@@ -555,16 +565,16 @@ def MyPlexSignIn(username, password, options):
             return ('', '')
         else:
             raise
-    
+
     dprint(__name__, 1, "====== MyPlex sign in XML ======")
     dprint(__name__, 1, response)
     dprint(__name__, 1, "====== MyPlex sign in XML finished ======")
-    
+
     # analyse response
     XMLTree = etree.ElementTree(etree.fromstring(response))
-    
+
     el_username = XMLTree.find('username')
-    el_authtoken = XMLTree.find('authentication-token')    
+    el_authtoken = XMLTree.find('authentication-token')
     if el_username is None or \
        el_authtoken is None:
         username = ''
@@ -574,7 +584,7 @@ def MyPlexSignIn(username, password, options):
         username = el_username.text
         authtoken = el_authtoken.text
         dprint(__name__, 0, 'MyPlex Sign In successfull')
-    
+
     return (username, authtoken)
 
 
@@ -584,14 +594,14 @@ def MyPlexSignOut(authtoken):
     MyPlexHost = 'plex.tv'
     MyPlexSignOutPath = '/users/sign_out.xml'
     MyPlexURL = 'http://' + MyPlexHost + MyPlexSignOutPath
-    
+
     # create POST request
     xargs = { 'X-Plex-Token': authtoken }
     request = urllib2.Request(MyPlexURL, None, xargs)
     request.get_method = lambda: 'POST'  # turn into 'POST' - done automatically with data!=None. But we don't have data.
-    
+
     response = urllib2.urlopen(request).read()
-    
+
     dprint(__name__, 1, "====== MyPlex sign out XML ======")
     dprint(__name__, 1, response)
     dprint(__name__, 1, "====== MyPlex sign out XML finished ======")
@@ -615,16 +625,16 @@ result:
 """
 def getTranscodeVideoPath(path, AuthToken, options, action, quality, subtitle, audio, partIndex):
     UDID = options['PlexConnectUDID']
-    
+
     transcodePath = '/video/:/transcode/universal/start.m3u8?'
-    
+
     vRes = quality[0]
     vQ = quality[1]
     mVB = quality[2]
     dprint(__name__, 1, "Setting transcode quality Res:{0} Q:{1} {2}Mbps", vRes, vQ, mVB)
     dprint(__name__, 1, "Subtitle: selected {0}, dontBurnIn {1}, size {2}", subtitle['selected'], subtitle['dontBurnIn'], subtitle['size'])
     dprint(__name__, 1, "Audio: boost {0}", audio['boost'])
-    
+
     args = dict()
     args['session'] = UDID
     args['protocol'] = 'hls'
@@ -639,12 +649,12 @@ def getTranscodeVideoPath(path, AuthToken, options, action, quality, subtitle, a
     args['fastSeek'] = '1'
     args['path'] = path
     args['partIndex'] = partIndex
-    
+
     xargs = getXArgsDeviceInfo(options)
     xargs['X-Plex-Client-Capabilities'] = "protocols=http-live-streaming,http-mp4-streaming,http-streaming-video,http-streaming-video-720p,http-mp4-video,http-mp4-video-720p;videoDecoders=h264{profile:high&resolution:1080&level:41};audioDecoders=mp3,aac{bitrate:160000}"
     if not AuthToken=='':
         xargs['X-Plex-Token'] = AuthToken
-    
+
     return transcodePath + urlencode(args) + '&' + urlencode(xargs)
 
 
@@ -673,7 +683,7 @@ def getDirectVideoPath(key, AuthToken):
                 path = key + '?' + urlencode(xargs)
             else:
                 path = key + '&' + urlencode(xargs)
-    
+
     return path
 
 
@@ -698,19 +708,19 @@ def getTranscodeImagePath(key, AuthToken, path, width, height):
     else:  # internal path, add-on
         path = 'http://127.0.0.1:32400' + path + '/' + key
     path = path.encode('utf8')
-    
+
     # This is bogus (note the extra path component) but ATV is stupid when it comes to caching images, it doesn't use querystrings.
     # Fortunately PMS is lenient...
     transcodePath = '/photo/:/transcode/' +str(width)+'x'+str(height)+ '/' + quote_plus(path)
-    
+
     args = dict()
     args['width'] = width
     args['height'] = height
     args['url'] = path
-    
+
     if not AuthToken=='':
         args['X-Plex-Token'] = AuthToken
-    
+
     return transcodePath + '?' + urlencode(args)
 
 
@@ -732,7 +742,7 @@ def getDirectImagePath(path, AuthToken):
             path = path + '?' + urlencode(xargs)
         else:
             path = path + '&' + urlencode(xargs)
-    
+
     return path
 
 
@@ -750,19 +760,19 @@ result:
 """
 def getTranscodeAudioPath(path, AuthToken, options, maxAudioBitrate):
     UDID = options['PlexConnectUDID']
-    
+
     transcodePath = '/music/:/transcode/universal/start.mp3?'
-    
+
     args = dict()
     args['path'] = path
     args['session'] = UDID
     args['protocol'] = 'http'
     args['maxAudioBitrate'] = maxAudioBitrate
-    
+
     xargs = getXArgsDeviceInfo(options)
     if not AuthToken=='':
         xargs['X-Plex-Token'] = AuthToken
-    
+
     return transcodePath + urlencode(args) + '&' + urlencode(xargs)
 
 
@@ -784,7 +794,7 @@ def getDirectAudioPath(path, AuthToken):
             path = path + '?' + urlencode(xargs)
         else:
             path = path + '&' + urlencode(xargs)
-    
+
     return path
 
 
@@ -796,55 +806,55 @@ if __name__ == '__main__':
     testMyPlexXML = 0
     testMyPlexSignIn = 0
     testMyPlexSignOut = 0
-    
+
     username = 'abc'
     password = 'def'
     token = 'xyz'
-    
-    
+
+
     # test PlexGDM
     if testPlexGDM:
         dprint('', 0, "*** PlexGDM")
         PMS_list = PlexGDM()
         dprint('', 0, PMS_list)
-    
-    
+
+
     # test XML from local PMS
     if testLocalPMS:
         dprint('', 0, "*** XML from local PMS")
         XML = getXMLFromPMS('http://127.0.0.1:32400', '/library/sections')
-    
-    
+
+
     # test local Server/Sections
     if testSectionXML:
         dprint('', 0, "*** local Server/Sections")
         PMS_list = PlexGDM()
         XML = getSectionXML(PMS_list, {}, '')
-    
-    
+
+
     # test XML from MyPlex
     if testMyPlexXML:
         dprint('', 0, "*** XML from MyPlex")
         XML = getXMLFromPMS('https://plex.tv', '/pms/servers', None, token)
         XML = getXMLFromPMS('https://plex.tv', '/pms/system/library/sections', None, token)
-    
-    
+
+
     # test MyPlex Sign In
     if testMyPlexSignIn:
         dprint('', 0, "*** MyPlex Sign In")
         options = {'PlexConnectUDID':'007'}
-        
+
         (user, token) = MyPlexSignIn(username, password, options)
         if user=='' and token=='':
             dprint('', 0, "Authentication failed")
         else:
             dprint('', 0, "logged in: {0}, {1}", user, token)
-    
-    
+
+
     # test MyPlex Sign out
     if testMyPlexSignOut:
         dprint('', 0, "*** MyPlex Sign Out")
         MyPlexSignOut(token)
         dprint('', 0, "logged out")
-    
+
     # test transcoder
